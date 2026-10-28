@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRON Security Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0d1117; color: #c9d1d9; }
+        .risk-high { border-left: 4px solid #f85149; background-color: rgba(248,81,73,0.1); }
+        .risk-med { border-left: 4px solid #d29922; background-color: rgba(210,153,34,0.1); }
+        .risk-safe { border-left: 4px solid #3fb950; }
+        tr:hover { background-color: #161b22; }
+        .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
+    </style>
+</head>
+<body class="p-4 md:p-8 font-sans">
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-8 border-b border-gray-700 pb-4 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-white mb-2">🛡️ TRON Security Scanner</h1>
+                <p class="text-gray-400">Production-grade static analysis for missing ownership modifiers.</p>
+            </div>
+        </header>
+
+        <div class="mb-6 flex gap-3">
+            <input type="text" id="contractInput" placeholder="Enter TRON contract address (e.g. TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t)" 
+                   class="w-full p-3 rounded bg-gray-800 border border-gray-600 text-white focus:outline-none focus:border-blue-500 code">
+            <button onclick="runScanner()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded transition font-semibold whitespace-nowrap">
+                Analyze
+            </button>
+        </div>
+
+        <div id="status-bar" class="mb-4 text-sm text-gray-400">Status: Ready.</div>
+
+        <div id="results-container" class="hidden overflow-x-auto rounded-lg border border-gray-700">
+            <table class="w-full text-left border-collapse text-sm">
+                <thead class="bg-gray-800 text-gray-300">
+                    <tr>
+                        <th class="p-3 border-b border-gray-700">Contract</th>
+                        <th class="p-3 border-b border-gray-700">Risk Level</th>
+                        <th class="p-3 border-b border-gray-700">Findings</th>
+                    </tr>
+                </thead>
+                <tbody id="results-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        async function runScanner() {
+            const address = document.getElementById('contractInput').value.trim();
+            if (!address) {
+                setStatus('Please enter a contract address.', 'error');
+                return;
+            }
+
+            const resultsContainer = document.getElementById('results-container');
+            const resultsBody = document.getElementById('results-body');
+            setStatus('Analyzing...', 'info');
+            resultsContainer.classList.add('hidden');
+            resultsBody.innerHTML = '';
+
+            try {
+                // Call your secure backend proxy
+                const response = await fetch(`/api/analyze?address=${address}`);
+                const data = await response.json();
+
+                if (!response.ok) throw new Error(data.error || 'Analysis failed.');
+
+                renderResults(data);
+                setStatus('Scan complete.', 'success');
+
+            } catch (err) {
+                setStatus('Error: ' + err.message, 'error');
+            }
+        }
+
+        function setStatus(msg, type) {
+            const el = document.getElementById('status-bar');
+            el.textContent = msg;
+            el.className = 'mb-4 text-sm ' + (
+                type === 'error' ? 'text-red-400' :
+                type === 'success' ? 'text-green-400' : 'text-gray-400'
+            );
+        }
+
+        function renderResults(data) {
+            const container = document.getElementById('results-container');
+            const body = document.getElementById('results-body');
+            container.classList.remove('hidden');
+
+            const riskClass = data.riskLevel === 'HIGH RISK / DRAINABLE' ? 'risk-high' :
+                              data.riskLevel === 'WARNING' ? 'risk-med' : 'risk-safe';
+
+            const tr = document.createElement('tr');
+            tr.className = riskClass;
+
+            const link = `https://tronscan.org/#/contract/${data.address}/code`;
+
+            tr.innerHTML = `
+                <td class="p-3 code break-all">
+                    <a href="${link}" target="_blank" class="text-blue-400 hover:underline">${data.address}</a>
+                    <div class="text-gray-400 text-xs mt-1">${data.name}</div>
+                </td>
+                <td class="p-3 font-bold ${data.riskLevel === 'HIGH RISK / DRAINABLE' ? 'text-red-500' : data.riskLevel === 'WARNING' ? 'text-yellow-500' : 'text-green-500'}">
+                    ${data.riskLevel}
+                </td>
+                <td class="p-3 text-xs">
+                    ${data.findings.length === 0 ? '<span class="text-green-400">No issues found.</span>' : ''}
+                    <ul class="list-disc pl-4 space-y-1 text-gray-300">
+                        ${data.findings.map(f => `<li><strong class="${f.severity === 'HIGH' ? 'text-red-400' : 'text-yellow-400'}">[${f.severity}]</strong> ${f.reason}</li>`).join('')}
+                    </ul>
+                </td>
+            `;
+            body.appendChild(tr);
+        }
+
+        document.getElementById('contractInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') runScanner();
+        });
+    </script>
+</body>
+</html>
