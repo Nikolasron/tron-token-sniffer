@@ -12,18 +12,22 @@ export default async function handler(req, res) {
             const listRes = await fetch('https://apilist.tronscanapi.com/api/contracts?verified-only=true&limit=5&start=0&sort=-timestamp', { headers });
             const listData = await listRes.json();
             
-            if (!listData.data) throw new Error("Could not fetch contract list.");
+            if (!listData.data) throw new Error("Could not fetch contract list from Tronscan.");
             
             const results = [];
             for (const item of listData.data) {
-                // Fetch detailed source code for each
+                // Fetch detailed source code for each contract
                 const detailRes = await fetch(`https://apilist.tronscanapi.com/api/contract?contract=${item.address}`, { headers });
                 const detailData = await detailRes.json();
                 const contract = detailData.data?.[0];
                 
                 if (contract && contract.code) {
                     const analysis = analyzeContract(contract.code, contract.abi);
-                    results.push({ address: item.address, name: item.name || 'Unknown', ...analysis });
+                    results.push({ 
+                        address: item.address, 
+                        name: item.name || 'Unknown', 
+                        ...analysis 
+                    });
                 }
             }
             return res.status(200).json({ results });
@@ -47,8 +51,85 @@ export default async function handler(req, res) {
         return res.status(200).json({ address, name: contract.name || 'Unknown Contract', ...analysis });
 
     } catch (error) {
+        console.error("Backend Error:", error);
         return res.status(500).json({ error: error.message });
     }
 }
 
-// [Keep the analyzeContract, checkFunctionHasModifier, and escapeRegExp functions exactly as they are in your current file]
+// ─── Analysis Engine ───────────────────────────────────────────
+function analyzeContract(sourceCode, abiString) {
+    const OWNERSHIP_MODIFIERS = [
+        'onlyowner', 'onlyadmin', 'onlyrole', 'onlyminter', 'onlyoperator',
+        'onlygovernance', 'onlydao', 'auth', 'restricted', 'onlyauthorized'
+    ];
+
+    // Critical functions that should NEVER be public. 
+    // Note: transferFrom is excluded because standard tokens (like USDT) need it to be public.
+    const CRITICAL_FUNCTIONS = [
+        'withdraw', 'sweep', 'rescue', 'mint', 'burn', 'pause', 'unpause', 
+        'setfee', 'settax', 'setmax', 'blacklist', 'upgradeto', 'setimplementation', 
+        'execute', 'kill', 'selfdestruct'
+    ];
+
+    let abi;
+    try {
+        abi = JSON.parse(abiString || '[]');
+    } catch {
+        abi = [];
+    }
+
+    const functions = abi.filter(item => item.type === 'function');
+    const findings = [];
+
+    for (const fn of functions) {
+        const fnName = fn.name;
+        if (!fnName || fn.stateMutability === 'view' || fn.stateMutability === 'pure') continue;
+
+        const isCritical = CRITICAL_FUNCTIONS.some(c => fnName.toLowerCase().includes(c));
+        const hasModifier = checkFunctionHasModifier(sourceCode, fnName);
+
+        if (!hasModifier) {
+            if (isCritical) {
+                findings.push({
+                    function: fnName,
+                    severity: 'HIGH',
+                    reason: `CRITICAL BACKDOOR: Function '${fnName}' is public and lacks an ownership modifier. Anyone can call this.`
+                });
+            } else {
+                findings.push({
+                    function: fnName,
+                    severity: 'MEDIUM',
+                    reason: `Public function '${fnName}' has no ownership modifier. Ensure this is intended.`
+                });
+            }
+        }
+    }
+
+    const hasHigh = findings.some(f => f.severity === 'HIGH');
+    const riskLevel = hasHigh ? 'HIGH RISK / DRAINABLE' : (findings.length > 0 ? 'WARNING' : 'SAFE');
+
+    return { riskLevel, findings };
+}
+
+function checkFunctionHasModifier(source, fnName) {
+    const regex = new RegExp(`function\\s+${escapeRegExp(fnName)}\\s*\\([^)]*\\)[^{]*\\{`, 's');
+    const match = source.match(regex);
+    if (!match) return false; 
+
+    const signatureBlock = match[0].toLowerCase();
+
+    for (const mod of OWNERSHIP_MODIFIERS) {
+        if (signatureBlock.includes(mod)) return true;
+    }
+
+    if (signatureBlock.includes('msg.sender') && 
+       (signatureBlock.includes('owner') || signatureBlock.includes('admin'))) {
+        return true;
+    }
+
+    return false;
+}
+
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
