@@ -16,22 +16,28 @@
 </head>
 <body class="p-4 md:p-8 font-sans">
     <div class="max-w-7xl mx-auto">
-        <header class="mb-8 border-b border-gray-700 pb-4 flex justify-between items-center">
-            <div>
-                <h1 class="text-3xl font-bold text-white mb-2">🛡️ TRON Security Scanner</h1>
-                <p class="text-gray-400">Production-grade static analysis for missing ownership modifiers.</p>
-            </div>
+        <header class="mb-8 border-b border-gray-700 pb-4">
+            <h1 class="text-3xl font-bold text-white mb-2">🛡️ TRON Security Scanner</h1>
+            <p class="text-gray-400">Auto-scans newly verified contracts or manually check any address.</p>
         </header>
 
-        <div class="mb-6 flex gap-3">
-            <input type="text" id="contractInput" placeholder="Enter TRON contract address (e.g. TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t)" 
-                   class="w-full p-3 rounded bg-gray-800 border border-gray-600 text-white focus:outline-none focus:border-blue-500 code">
-            <button onclick="runScanner()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded transition font-semibold whitespace-nowrap">
-                Analyze
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <!-- Auto Scan Button -->
+            <button onclick="runAutoScanner()" class="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded transition font-semibold shadow-lg">
+                🚀 Auto-Scan Latest Verified Contracts
             </button>
+
+            <!-- Manual Scan Input -->
+            <div class="flex gap-2">
+                <input type="text" id="contractInput" placeholder="Enter specific TRON address..." 
+                       class="w-full p-3 rounded bg-gray-800 border border-gray-600 text-white focus:outline-none focus:border-blue-500 code">
+                <button onclick="runScanner()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition font-semibold whitespace-nowrap">
+                    Analyze
+                </button>
+            </div>
         </div>
 
-        <div id="status-bar" class="mb-4 text-sm text-gray-400">Status: Ready.</div>
+        <div id="status-bar" class="mb-4 text-sm text-gray-400">Status: Ready. You can auto-scan or enter an address.</div>
 
         <div id="results-container" class="hidden overflow-x-auto rounded-lg border border-gray-700">
             <table class="w-full text-left border-collapse text-sm">
@@ -48,32 +54,53 @@
     </div>
 
     <script>
+        // Manual Scan
         async function runScanner() {
             const address = document.getElementById('contractInput').value.trim();
-            if (!address) {
-                setStatus('Please enter a contract address.', 'error');
-                return;
-            }
-
-            const resultsContainer = document.getElementById('results-container');
-            const resultsBody = document.getElementById('results-body');
-            setStatus('Analyzing...', 'info');
-            resultsContainer.classList.add('hidden');
-            resultsBody.innerHTML = '';
+            if (!address) return setStatus('Please enter an address.', 'error');
+            
+            clearResults();
+            setStatus('Analyzing single contract...', 'info');
 
             try {
-                // Call your secure backend proxy
                 const response = await fetch(`/api/analyze?address=${address}`);
                 const data = await response.json();
-
-                if (!response.ok) throw new Error(data.error || 'Analysis failed.');
-
-                renderResults(data);
+                if (!response.ok) throw new Error(data.error);
+                
+                renderRow(data);
+                document.getElementById('results-container').classList.remove('hidden');
                 setStatus('Scan complete.', 'success');
-
             } catch (err) {
                 setStatus('Error: ' + err.message, 'error');
             }
+        }
+
+        // Auto Scan Latest
+        async function runAutoScanner() {
+            clearResults();
+            setStatus('Fetching and analyzing latest verified contracts... (This may take 5-10 seconds)', 'info');
+
+            try {
+                const response = await fetch(`/api/analyze?mode=latest`);
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error);
+                
+                if (!data.results || data.results.length === 0) {
+                    setStatus('No verified contracts found in the latest block.', 'warning');
+                    return;
+                }
+
+                data.results.forEach(contract => renderRow(contract));
+                document.getElementById('results-container').classList.remove('hidden');
+                setStatus(`Auto-scan complete. Analyzed ${data.results.length} recent contracts.`, 'success');
+            } catch (err) {
+                setStatus('Error: ' + err.message, 'error');
+            }
+        }
+
+        function clearResults() {
+            document.getElementById('results-body').innerHTML = '';
+            document.getElementById('results-container').classList.add('hidden');
         }
 
         function setStatus(msg, type) {
@@ -81,21 +108,18 @@
             el.textContent = msg;
             el.className = 'mb-4 text-sm ' + (
                 type === 'error' ? 'text-red-400' :
-                type === 'success' ? 'text-green-400' : 'text-gray-400'
+                type === 'success' ? 'text-green-400' : 
+                type === 'warning' ? 'text-yellow-400' : 'text-gray-400'
             );
         }
 
-        function renderResults(data) {
-            const container = document.getElementById('results-container');
+        function renderRow(data) {
             const body = document.getElementById('results-body');
-            container.classList.remove('hidden');
-
             const riskClass = data.riskLevel === 'HIGH RISK / DRAINABLE' ? 'risk-high' :
                               data.riskLevel === 'WARNING' ? 'risk-med' : 'risk-safe';
 
             const tr = document.createElement('tr');
             tr.className = riskClass;
-
             const link = `https://tronscan.org/#/contract/${data.address}/code`;
 
             tr.innerHTML = `
@@ -115,10 +139,6 @@
             `;
             body.appendChild(tr);
         }
-
-        document.getElementById('contractInput').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') runScanner();
-        });
     </script>
 </body>
 </html>
